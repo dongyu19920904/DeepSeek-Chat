@@ -4,8 +4,11 @@ import ReactMarkdown from 'react-markdown';
 import clsx from 'clsx';
 
 interface Message {
-  role: 'user' | 'assistant' | 'error';
+  role: 'user' | 'assistant' | 'error' | 'thinking';
   content: string;
+  thinking?: string[];
+  isStreaming?: boolean;
+  showThinking?: boolean;
 }
 
 interface ModelConfig {
@@ -68,6 +71,17 @@ function App() {
     setInput('');
     setLoading(true);
 
+    if (selectedModel.id === 'Pro/deepseek-ai/DeepSeek-R1') {
+      const thinkingMessage: Message = {
+        role: 'thinking',
+        content: '',
+        thinking: [],
+        isStreaming: true,
+        showThinking: true
+      };
+      setMessages(prev => [...prev, thinkingMessage]);
+    }
+
     try {
       const response = await fetch(apiUrl + '/chat/completions', {
         method: 'POST',
@@ -78,33 +92,62 @@ function App() {
         body: JSON.stringify({
           model: selectedModel.id,
           messages: [...messages, userMessage].map(msg => ({
-            role: msg.role === 'error' ? 'assistant' : msg.role,
+            role: msg.role === 'error' || msg.role === 'thinking' ? 'assistant' : msg.role,
             content: msg.content,
           })),
+          stream: true,
         }),
       });
 
-      let data;
-      try {
-        data = await response.json();
-      } catch (e) {
-        throw new Error('无法解析服务器响应');
-      }
-
       if (!response.ok) {
-        throw new Error(data.error?.message || data.message || '请求失败');
+        throw new Error('请求失败');
       }
 
-      if (!data.choices?.[0]?.message?.content) {
-        throw new Error('服务器返回了无效的响应格式');
-      }
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('无法读取响应流');
 
-      const assistantMessage: Message = {
+      let assistantMessage: Message = {
         role: 'assistant',
-        content: data.choices[0].message.content,
+        content: '',
+        isStreaming: true,
       };
-
       setMessages(prev => [...prev, assistantMessage]);
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = new TextDecoder().decode(value);
+        const lines = chunk.split('\n').filter(line => line.trim() !== '');
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = JSON.parse(line.slice(5));
+            if (data.choices?.[0]?.delta?.content) {
+              const content = data.choices[0].delta.content;
+              assistantMessage.content += content;
+              
+              if (selectedModel.id === 'Pro/deepseek-ai/DeepSeek-R1' && content.includes('思考过程：')) {
+                const thinkingMatch = content.match(/思考过程：([\s\S]*?)结论：/);
+                if (thinkingMatch) {
+                  const thoughts = thinkingMatch[1].split('\n').filter(t => t.trim());
+                  assistantMessage.thinking = thoughts;
+                }
+              }
+              
+              setMessages(prev => prev.map((msg, i) => 
+                i === prev.length - 1 ? { ...assistantMessage } : msg
+              ));
+            }
+          }
+        }
+      }
+
+      assistantMessage.isStreaming = false;
+      setMessages(prev => prev.map((msg, i) => 
+        i === prev.length - 1 ? { ...assistantMessage } : msg
+      ));
+
     } catch (error) {
       const errorMessage: Message = {
         role: 'error',
@@ -115,6 +158,12 @@ function App() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const toggleThinking = (index: number) => {
+    setMessages(prev => prev.map((msg, i) => 
+      i === index ? { ...msg, showThinking: !msg.showThinking } : msg
+    ));
   };
 
   return (
@@ -163,6 +212,8 @@ function App() {
                     ? 'bg-blue-600'
                     : message.role === 'error'
                     ? 'bg-red-600'
+                    : message.role === 'thinking'
+                    ? 'bg-gray-600'
                     : 'bg-gray-700'
                 )}
               >
@@ -171,16 +222,47 @@ function App() {
                     <FiUser />
                   ) : message.role === 'error' ? (
                     <FiAlertCircle />
+                  ) : message.role === 'thinking' ? (
+                    <FiZap className="animate-pulse" />
                   ) : (
                     <img src="/deepseek-logo.png" className="w-6 h-6" alt="DeepSeek" />
                   )}
                   <span className="font-medium">
-                    {message.role === 'user' ? '你' : message.role === 'error' ? '错误' : 'DeepSeek'}
+                    {message.role === 'user' ? '你' : 
+                     message.role === 'error' ? '错误' : 
+                     message.role === 'thinking' ? '思考中...' : 
+                     'DeepSeek'}
                   </span>
+                  {message.thinking && message.thinking.length > 0 && (
+                    <button
+                      onClick={() => toggleThinking(index)}
+                      className="ml-2 text-sm text-gray-300 hover:text-white"
+                    >
+                      {message.showThinking ? '收起思考过程' : '展开思考过程'}
+                    </button>
+                  )}
                 </div>
+                
+                {message.thinking && message.showThinking && (
+                  <div className="mb-4 p-2 bg-gray-800 rounded">
+                    <div className="text-sm text-gray-300 mb-2">思考过程：</div>
+                    {message.thinking.map((thought, i) => (
+                      <div key={i} className="ml-4 text-sm text-gray-300">
+                        {i + 1}. {thought}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
                 <ReactMarkdown className="prose prose-invert">
                   {message.content}
                 </ReactMarkdown>
+                
+                {message.isStreaming && (
+                  <div className="mt-2">
+                    <div className="animate-pulse inline-block w-2 h-4 bg-gray-400 rounded"></div>
+                  </div>
+                )}
               </div>
             </div>
           ))}
