@@ -1,4 +1,4 @@
-import { FC, useState, useRef, useEffect } from 'react';
+import { type ReactElement, useState, useRef, useEffect } from 'react';
 import { FiMessageSquare, FiSettings, FiUser, FiSend, FiZap, FiAlertCircle } from 'react-icons/fi';
 import ReactMarkdown from 'react-markdown';
 import clsx from 'clsx';
