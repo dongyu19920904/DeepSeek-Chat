@@ -16,8 +16,9 @@
     "react-markdown": "^9.0.1",
     "@tailwindcss/typography": "^0.5.10",
     "clsx": "^2.0.0",
-    "rimraf": "^5.0.0",
-    "glob": "^10.0.0"
+    "rimraf": "^5.0.5",
+    "glob": "^10.0.0",
+    "eslint": "^9.0.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.43",
